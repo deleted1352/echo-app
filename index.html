@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Echo — connect students who need help with peers who have the skills.">
+  <title>Echo | Student Skill Requests</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="navbar">
+    <div class="navbar__inner">
+      <a href="#" class="navbar__logo" aria-label="Echo home">
+        <span class="navbar__logo-icon" aria-hidden="true">◉</span>
+        Echo
+      </a>
+
+      <nav class="navbar__links" aria-label="Main navigation">
+        <a href="#feed" class="navbar__link navbar__link--active" data-nav="home">Home</a>
+        <button type="button" class="navbar__link navbar__link--btn" data-nav="post">Post Request</button>
+      </nav>
+
+      <div class="navbar__actions">
+        <button type="button" class="btn btn--icon" id="theme-toggle" aria-label="Toggle dark mode">
+          <span class="theme-icon theme-icon--sun" aria-hidden="true">☀</span>
+          <span class="theme-icon theme-icon--moon" aria-hidden="true">☾</span>
+        </button>
+        <button type="button" class="btn btn--ghost" id="login-btn">Login</button>
+        <button type="button" class="btn btn--primary" id="signup-btn">Sign Up</button>
+      </div>
+
+      <button type="button" class="navbar__menu-btn" id="menu-toggle" aria-label="Open menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+
+    <nav class="navbar__mobile" id="mobile-nav" hidden>
+      <a href="#feed" class="navbar__mobile-link" data-nav="home">Home</a>
+      <button type="button" class="navbar__mobile-link" data-nav="post">Post Request</button>
+      <button type="button" class="navbar__mobile-link" id="mobile-login">Login</button>
+      <button type="button" class="navbar__mobile-link navbar__mobile-link--accent" id="mobile-signup">Sign Up</button>
+    </nav>
+  </header>
+
+  <main class="main">
+    <section class="hero">
+      <div class="hero__content">
+        <p class="hero__eyebrow">Peer-to-peer learning</p>
+        <h1 class="hero__title">Find help. Share skills.</h1>
+        <p class="hero__subtitle">
+          Echo connects students who need a hand with classmates who have the know-how.
+        </p>
+        <button type="button" class="btn btn--primary btn--lg" id="hero-post-btn">
+          Post a Request
+        </button>
+      </div>
+    </section>
+
+    <section class="feed" id="feed">
+      <div class="feed__header">
+        <div>
+          <h2 class="feed__title">Skill Requests</h2>
+          <p class="feed__subtitle">Browse what students are looking for today.</p>
+        </div>
+        <div class="feed__filters">
+          <label class="sr-only" for="filter-subject">Filter by subject</label>
+          <select id="filter-subject" class="select">
+            <option value="all">All subjects</option>
+            <option value="math">Math</option>
+            <option value="science">Science</option>
+            <option value="writing">Writing</option>
+            <option value="coding">Coding</option>
+            <option value="design">Design</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="feed__grid" id="feed-grid" role="list">
+        <!-- Cards rendered by app.js -->
+      </div>
+
+      <p class="feed__empty" id="feed-empty" hidden>
+        No requests yet. Be the first to post one!
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>&copy; <span id="year"></span> Echo. Built for students, by students.</p>
+  </footer>
+
+  <!-- Post Request Modal -->
+  <dialog class="modal" id="post-modal" aria-labelledby="modal-title">
+    <form class="modal__form" id="post-form" method="dialog">
+      <header class="modal__header">
+        <h2 class="modal__title" id="modal-title">Post a Skill Request</h2>
+        <button type="button" class="btn btn--icon modal__close" id="modal-close" aria-label="Close">
+          &times;
+        </button>
+      </header>
+
+      <div class="modal__body">
+        <div class="field">
+          <label class="field__label" for="post-title">Title</label>
+          <input
+            type="text"
+            id="post-title"
+            class="field__input"
+            placeholder="e.g. Need help with calculus derivatives"
+            required
+            maxlength="120"
+          >
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="post-subject">Subject</label>
+          <select id="post-subject" class="field__input select" required>
+            <option value="" disabled selected>Select a subject</option>
+            <option value="math">Math</option>
+            <option value="science">Science</option>
+            <option value="writing">Writing</option>
+            <option value="coding">Coding</option>
+            <option value="design">Design</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="post-description">Description</label>
+          <textarea
+            id="post-description"
+            class="field__input field__textarea"
+            rows="4"
+            placeholder="Describe what you need help with..."
+            required
+            maxlength="500"
+          ></textarea>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="post-author">Your name</label>
+          <input
+            type="text"
+            id="post-author"
+            class="field__input"
+            placeholder="First name or nickname"
+            required
+            maxlength="40"
+          >
+        </div>
+      </div>
+
+      <footer class="modal__footer">
+        <button type="button" class="btn btn--ghost" id="modal-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary">Publish Request</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Auth placeholder modal -->
+  <dialog class="modal modal--sm" id="auth-modal" aria-labelledby="auth-modal-title">
+    <form class="modal__form" id="auth-form" method="dialog">
+      <header class="modal__header">
+        <h2 class="modal__title" id="auth-modal-title">Welcome to Echo</h2>
+        <button type="button" class="btn btn--icon modal__close" id="auth-close" aria-label="Close">
+          &times;
+        </button>
+      </header>
+      <div class="modal__body">
+        <p class="modal__text">Sign in or create an account to save your requests and respond to others.</p>
+        <div class="field">
+          <label class="field__label" for="auth-email">Email</label>
+          <input type="email" id="auth-email" class="field__input" placeholder="you@school.edu">
+        </div>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="btn btn--ghost" id="auth-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary">Continue</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
