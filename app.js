@@ -4,7 +4,7 @@
   // ── Supabase client ───────────────────────────────────────────────
   // (Your project URL + anon key go here — already set up, per your note.)
   const supabase = window.supabase.createClient(
-    "https://bewvbsntbflxytugackd.supabase.co/rest/v1/",
+    "https://bewvbsntbflxytugackd.supabase.co/",
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3Zic250YmZseHl0dWdhY2tkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NzkxOTAsImV4cCI6MjEwMjA1NTE5MH0.Me3BSLFYiVz4ppx4jR_UlfP1Bn8yUqFUz7vj6PNPgK8"
   );
 
