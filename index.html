@@ -25,8 +25,17 @@
           <span class="theme-icon theme-icon--sun" aria-hidden="true">☀</span>
           <span class="theme-icon theme-icon--moon" aria-hidden="true">☾</span>
         </button>
-        <button type="button" class="btn btn--ghost" id="login-btn">Login</button>
-        <button type="button" class="btn btn--primary" id="signup-btn">Sign Up</button>
+
+        <div class="navbar__auth" id="auth-guest">
+          <button type="button" class="btn btn--ghost" id="login-btn">Login</button>
+          <button type="button" class="btn btn--primary" id="signup-btn">Sign Up</button>
+        </div>
+
+        <div class="navbar__auth navbar__auth--logged-in" id="auth-user" hidden>
+          <span class="navbar__welcome" id="welcome-text">Welcome, User</span>
+          <button type="button" class="btn btn--ghost" id="inbox-btn">Inbox</button>
+          <button type="button" class="btn btn--ghost" id="logout-btn">Logout</button>
+        </div>
       </div>
 
       <button type="button" class="navbar__menu-btn" id="menu-toggle" aria-label="Open menu" aria-expanded="false">
@@ -39,8 +48,15 @@
     <nav class="navbar__mobile" id="mobile-nav" hidden>
       <a href="#feed" class="navbar__mobile-link" data-nav="home">Home</a>
       <button type="button" class="navbar__mobile-link" data-nav="post">Post Request</button>
-      <button type="button" class="navbar__mobile-link" id="mobile-login">Login</button>
-      <button type="button" class="navbar__mobile-link navbar__mobile-link--accent" id="mobile-signup">Sign Up</button>
+      <div id="mobile-auth-guest">
+        <button type="button" class="navbar__mobile-link" id="mobile-login">Login</button>
+        <button type="button" class="navbar__mobile-link navbar__mobile-link--accent" id="mobile-signup">Sign Up</button>
+      </div>
+      <div id="mobile-auth-user" hidden>
+        <p class="navbar__mobile-welcome" id="mobile-welcome-text">Welcome, User</p>
+        <button type="button" class="navbar__mobile-link" id="mobile-inbox">Inbox</button>
+        <button type="button" class="navbar__mobile-link" id="mobile-logout">Logout</button>
+      </div>
     </nav>
   </header>
 
@@ -55,6 +71,56 @@
         <button type="button" class="btn btn--primary btn--lg" id="hero-post-btn">
           Post a Request
         </button>
+      </div>
+    </section>
+
+    <section class="exchange" id="exchange-section" hidden>
+      <div class="exchange__card">
+        <header class="exchange__header">
+          <h2 class="exchange__title">Post a Skill Exchange</h2>
+          <p class="exchange__subtitle">Share what you can teach and what you would like to learn.</p>
+        </header>
+
+        <form class="exchange__form" id="exchange-form" novalidate>
+          <p class="exchange-error" id="exchange-error" hidden role="alert"></p>
+
+          <div class="field">
+            <label class="field__label" for="my-skill">My Skill</label>
+            <input
+              type="text"
+              id="my-skill"
+              class="field__input"
+              placeholder="e.g. Python, essay writing, guitar"
+              maxlength="80"
+            >
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="seeking-skill">Seeking Skill</label>
+            <input
+              type="text"
+              id="seeking-skill"
+              class="field__input"
+              placeholder="e.g. Calculus, Photoshop, Spanish"
+              maxlength="80"
+            >
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="exchange-description">Description</label>
+            <textarea
+              id="exchange-description"
+              class="field__input field__textarea"
+              rows="4"
+              placeholder="Describe your exchange offer and what kind of help you are looking for..."
+              maxlength="500"
+            ></textarea>
+          </div>
+
+          <div class="exchange__actions">
+            <button type="submit" class="btn btn--primary">Submit Exchange</button>
+          </div>
+        </form>
       </div>
     </section>
 
@@ -75,6 +141,10 @@
             <option value="design">Design</option>
             <option value="other">Other</option>
           </select>
+          <label class="filter-toggle" for="filter-resolved">
+            <input type="checkbox" id="filter-resolved">
+            Show resolved
+          </label>
         </div>
       </div>
 
@@ -160,27 +230,116 @@
     </form>
   </dialog>
 
-  <!-- Auth placeholder modal -->
+  <!-- Auth modal -->
   <dialog class="modal modal--sm" id="auth-modal" aria-labelledby="auth-modal-title">
     <form class="modal__form" id="auth-form" method="dialog">
       <header class="modal__header">
-        <h2 class="modal__title" id="auth-modal-title">Welcome to Echo</h2>
+        <h2 class="modal__title" id="auth-modal-title">Log In</h2>
         <button type="button" class="btn btn--icon modal__close" id="auth-close" aria-label="Close">
           &times;
         </button>
       </header>
+
       <div class="modal__body">
-        <p class="modal__text">Sign in or create an account to save your requests and respond to others.</p>
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button type="button" class="auth-tab auth-tab--active" data-auth-mode="login" role="tab" aria-selected="true">
+            Log In
+          </button>
+          <button type="button" class="auth-tab" data-auth-mode="signup" role="tab" aria-selected="false">
+            Sign Up
+          </button>
+        </div>
+
+        <p class="auth-error" id="auth-error" hidden role="alert"></p>
+
         <div class="field">
-          <label class="field__label" for="auth-email">Email</label>
-          <input type="email" id="auth-email" class="field__input" placeholder="you@school.edu">
+          <label class="field__label" for="auth-username">Username</label>
+          <input
+            type="text"
+            id="auth-username"
+            class="field__input"
+            placeholder="Choose a username"
+            required
+            minlength="3"
+            maxlength="30"
+            autocomplete="username"
+          >
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="auth-password">Password</label>
+          <input
+            type="password"
+            id="auth-password"
+            class="field__input"
+            placeholder="Enter your password"
+            required
+            minlength="6"
+            autocomplete="current-password"
+          >
+        </div>
+
+        <div class="field" id="confirm-password-field" hidden>
+          <label class="field__label" for="auth-password-confirm">Confirm Password</label>
+          <input
+            type="password"
+            id="auth-password-confirm"
+            class="field__input"
+            placeholder="Re-enter your password"
+            minlength="6"
+            autocomplete="new-password"
+          >
         </div>
       </div>
+
       <footer class="modal__footer">
         <button type="button" class="btn btn--ghost" id="auth-cancel">Cancel</button>
-        <button type="submit" class="btn btn--primary">Continue</button>
+        <button type="submit" class="btn btn--primary" id="auth-submit">Log In</button>
       </footer>
     </form>
+  </dialog>
+  <dialog class="modal" id="chat-modal" aria-labelledby="chat-modal-title">
+    <header class="modal__header">
+      <div class="modal__heading-group">
+        <div class="modal__heading-row">
+          <h2 class="modal__title" id="chat-modal-title">Chat</h2>
+          <span class="badge--resolved" id="chat-modal-badge" hidden>Resolved</span>
+        </div>
+        <p class="modal__subtitle" id="chat-modal-subtitle"></p>
+      </div>
+      <button type="button" class="btn btn--icon modal__close" id="chat-close" aria-label="Close">
+        &times;
+      </button>
+    </header>
+
+    <div class="modal__body" style="padding-bottom: 0;">
+      <div id="chat-messages" class="chat-messages" aria-live="polite">
+        </div>
+    </div>
+
+    <footer class="modal__footer" style="padding-top: 1rem;">
+      <form id="chat-form" style="display: flex; gap: 0.5rem; width: 100%;">
+        <input type="text" id="chat-input" class="field__input" placeholder="Type a message..." required autocomplete="off">
+        <button type="submit" class="btn btn--primary">Send</button>
+      </form>
+    </footer>
+  </dialog>
+
+  <!-- Inbox modal -->
+  <dialog class="modal" id="inbox-modal" aria-labelledby="inbox-modal-title">
+    <header class="modal__header">
+      <h2 class="modal__title" id="inbox-modal-title">Inbox</h2>
+      <button type="button" class="btn btn--icon modal__close" id="inbox-close" aria-label="Close">
+        &times;
+      </button>
+    </header>
+
+    <div class="modal__body">
+      <div id="inbox-list" class="inbox-list"></div>
+      <p class="inbox-empty" id="inbox-empty" hidden>
+        No conversations yet. Join a discussion from the feed to get started.
+      </p>
+    </div>
   </dialog>
 
   <script src="app.js"></script>
