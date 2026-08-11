@@ -217,7 +217,7 @@
 
   // ── Authentication ──────────────────────────────────────────────
   function usernameToEmail(username) {
-    return `${normalizeUsername(username)}@echo.local`;
+    return `${normalizeUsername(username)}@echo.com`;
   }
 
   function normalizeUsername(username) {
