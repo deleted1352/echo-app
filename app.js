@@ -6,7 +6,6 @@
   const supabase = window.supabase.createClient(
     "https://bewvbsntbflxytugackd.supabase.co/rest/v1/",
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3Zic250YmZseHl0dWdhY2tkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NzkxOTAsImV4cCI6MjEwMjA1NTE5MH0.Me3BSLFYiVz4ppx4jR_UlfP1Bn8yUqFUz7vj6PNPgK8"
-
   );
 
   const THEME_KEY = "echo-theme"; // theme preference stays local — no need for a round trip
@@ -83,6 +82,26 @@
     await refreshFeed();
     updateAuthUI();
     subscribeToFeed();
+    watchAuthState();
+  }
+
+  // Keeps currentUser correct on its own — a token refresh, a session
+  // expiring, or logging in/out in another tab all fire this, not just
+  // this tab's own signUp()/logIn()/logOut() calls.
+  function watchAuthState() {
+    supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("username")
+          .eq("id", session.user.id)
+          .single();
+        currentUser = profile ? { username: profile.username, id: session.user.id } : null;
+      } else {
+        currentUser = null;
+      }
+      updateAuthUI();
+    });
   }
 
   // ── Theme ───────────────────────────────────────────────────────
