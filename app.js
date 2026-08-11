@@ -1,12 +1,15 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "echo-requests";
-  const EXCHANGES_KEY = "echo-exchanges";
-  const THEME_KEY = "echo-theme";
-  const USERS_KEY = "echo-users";
-  const SESSION_KEY = "echo-session";
-  const CHATS_KEY = "echo-chats";
+  // ── Supabase client ───────────────────────────────────────────────
+  // (Your project URL + anon key go here — already set up, per your note.)
+  const supabase = window.supabase.createClient(
+    "https://bewvbsntbflxytugackd.supabase.co/rest/v1/",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJld3Zic250YmZseHl0dWdhY2tkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NzkxOTAsImV4cCI6MjEwMjA1NTE5MH0.Me3BSLFYiVz4ppx4jR_UlfP1Bn8yUqFUz7vj6PNPgK8"
+
+  );
+
+  const THEME_KEY = "echo-theme"; // theme preference stays local — no need for a round trip
 
   const SUBJECT_LABELS = {
     math: "Math",
@@ -16,45 +19,6 @@
     design: "Design",
     other: "Other",
   };
-
-  const SAMPLE_REQUESTS = [
-    {
-      id: crypto.randomUUID(),
-      title: "Help with Python list comprehensions",
-      subject: "coding",
-      description: "I'm struggling to rewrite for-loops as list comprehensions for my CS 101 assignment.",
-      author: "Alex",
-      status: "active",
-      createdAt: Date.now() - 1000 * 60 * 45,
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "Proofreading my history essay",
-      subject: "writing",
-      description: "Need someone to review grammar and flow for a 5-page paper on the Industrial Revolution.",
-      author: "Jordan",
-      status: "active",
-      createdAt: Date.now() - 1000 * 60 * 60 * 3,
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "Understanding stoichiometry",
-      subject: "science",
-      description: "Can someone walk me through balancing chemical equations step by step?",
-      author: "Sam",
-      status: "active",
-      createdAt: Date.now() - 1000 * 60 * 60 * 8,
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "Logo design feedback",
-      subject: "design",
-      description: "Looking for quick critique on a club logo I made in Figma before submitting it.",
-      author: "Riley",
-      status: "active",
-      createdAt: Date.now() - 1000 * 60 * 60 * 24,
-    },
-  ];
 
   // ── DOM refs ──────────────────────────────────────────────────
   const feedGrid = document.getElementById("feed-grid");
@@ -98,22 +62,28 @@
   const filterResolved = document.getElementById("filter-resolved");
 
   // ── State ─────────────────────────────────────────────────────
-  let requests = loadRequests();
-  let exchanges = loadExchanges();
-  let currentUser = loadSession();
+  let requests = [];
+  let exchanges = [];
+  let currentUser = null;
   let authMode = "login";
   let activeChatKind = null; // "request" | "exchange"
-  let activeChatThreadId = null;
   let activeChatPostId = null;
   let activeChatPostTitle = null;
   let activeChatPostAuthor = null;
-  let chatPollTimer = null;
-  let lastRenderedChatSignature = null;
+  let chatChannel = null;
 
   // ── Init ──────────────────────────────────────────────────────
-  initTheme();
-  yearEl.textContent = new Date().getFullYear();
-  updateAuthUI(); // also renders the feed
+  init();
+
+  async function init() {
+    initTheme();
+    yearEl.textContent = new Date().getFullYear();
+
+    currentUser = await loadSession();
+    await refreshFeed();
+    updateAuthUI();
+    subscribeToFeed();
+  }
 
   // ── Theme ───────────────────────────────────────────────────────
   function initTheme() {
@@ -130,56 +100,88 @@
     localStorage.setItem(THEME_KEY, next);
   }
 
-  // ── Storage ─────────────────────────────────────────────────────
-  function loadRequests() {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      // `status` backfilled for data saved before the resolved/archive
-      // feature existed — anything without one is treated as active.
-      if (stored) return JSON.parse(stored).map((r) => ({ status: "active", ...r }));
-    } catch {
-      /* fall through */
+  // ── Posts (shared, server-side) ────────────────────────────────────
+  function normalizePost(row) {
+    return {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      subject: row.subject,
+      description: row.description,
+      mySkill: row.my_skill,
+      seekingSkill: row.seeking_skill,
+      author: row.author_name,
+      authorId: row.author_id,
+      status: row.status,
+      createdAt: new Date(row.created_at).getTime(),
+    };
+  }
+
+  async function refreshFeed() {
+    const { data, error } = await supabase
+      .from("posts")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(SAMPLE_REQUESTS));
-    return SAMPLE_REQUESTS;
+
+    const posts = data.map(normalizePost);
+    requests = posts.filter((p) => p.kind === "request");
+    exchanges = posts.filter((p) => p.kind === "exchange");
+    renderFeed();
   }
 
-  function saveRequests() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(requests));
-  }
-
-  function loadExchanges() {
-    try {
-      const stored = localStorage.getItem(EXCHANGES_KEY);
-      if (stored) return JSON.parse(stored).map((x) => ({ status: "active", ...x }));
-    } catch {
-      /* fall through */
+  // fields uses DB column names directly (title/subject/description or
+  // my_skill/seeking_skill) — author/status are always set server-side here.
+  async function createPost(kind, fields) {
+    const { error } = await supabase.from("posts").insert({
+      kind,
+      ...fields,
+      author_id: currentUser.id,
+      author_name: currentUser.username,
+      status: "active",
+    });
+    if (error) {
+      console.error(error);
+      return false;
     }
-    return [];
+    return true;
   }
 
-  function saveExchanges() {
-    localStorage.setItem(EXCHANGES_KEY, JSON.stringify(exchanges));
-  }
+  // No client-side ownership check needed — the "only the author can
+  // update their post" RLS policy rejects this at the database level for
+  // anyone else, so the button being hidden is a UX nicety, not the guard.
+  async function markResolved(id) {
+    const { error } = await supabase
+      .from("posts")
+      .update({ status: "resolved", resolved_at: new Date().toISOString() })
+      .eq("id", id);
 
-  function loadChats() {
-    try {
-      const stored = localStorage.getItem(CHATS_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch {
-      /* fall through */
+    if (error) {
+      console.error(error);
+      return;
     }
-    return {};
+
+    await refreshFeed();
+    if (activeChatPostId === id) updateChatModalHeader();
   }
 
-  function saveChats(chats) {
-    localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+  function subscribeToFeed() {
+    supabase
+      .channel("posts-feed")
+      .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, () => {
+        refreshFeed();
+      })
+      .subscribe();
   }
 
-  // One shared thread per post (request or exchange) — anyone logged in,
-  // including the post's own author, reads/writes the same thread.
-  function getThreadId(kind, postId) {
-    return `${kind}:${postId}`;
+  function getPostKind(id) {
+    if (requests.some((r) => r.id === id)) return "request";
+    if (exchanges.some((x) => x.id === id)) return "exchange";
+    return null;
   }
 
   function getPostRecord(kind, id) {
@@ -195,44 +197,8 @@
   }
 
   // ── Authentication ──────────────────────────────────────────────
-  function loadUsers() {
-    try {
-      const stored = localStorage.getItem(USERS_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch {
-      /* fall through */
-    }
-    return {};
-  }
-
-  function saveUsers(users) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }
-
-  function loadSession() {
-    try {
-      const stored = localStorage.getItem(SESSION_KEY);
-      if (stored) {
-        const session = JSON.parse(stored);
-        const users = loadUsers();
-        const key = normalizeUsername(session.username || "");
-        if (session.username && users[key]) return session;
-        localStorage.removeItem(SESSION_KEY);
-      }
-    } catch {
-      /* fall through */
-    }
-    return null;
-  }
-
-  function saveSession(username) {
-    currentUser = { username };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-  }
-
-  function clearSession() {
-    currentUser = null;
-    localStorage.removeItem(SESSION_KEY);
+  function usernameToEmail(username) {
+    return `${normalizeUsername(username)}@echo.local`;
   }
 
   function normalizeUsername(username) {
@@ -243,36 +209,17 @@
     return username.trim();
   }
 
-  async function hashPassword(password, salt) {
-    const encoder = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(password),
-      "PBKDF2",
-      false,
-      ["deriveBits"]
-    );
-    const bits = await crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        salt: encoder.encode(salt),
-        iterations: 100000,
-        hash: "SHA-256",
-      },
-      keyMaterial,
-      256
-    );
-    return Array.from(new Uint8Array(bits))
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-  }
+  async function loadSession() {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return null;
 
-  function generateSalt() {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", data.session.user.id)
+      .single();
+
+    return profile ? { username: profile.username, id: data.session.user.id } : null;
   }
 
   function showAuthError(message) {
@@ -332,68 +279,67 @@
 
   async function signUp(username, password, confirmPassword) {
     const normalized = normalizeUsername(username);
-    const displayName = displayUsername(username);
 
     if (normalized.length < 3) {
       showAuthError("Username must be at least 3 characters.");
       return false;
     }
-
     if (password.length < 6) {
       showAuthError("Password must be at least 6 characters.");
       return false;
     }
-
     if (password !== confirmPassword) {
       showAuthError("Passwords do not match.");
       return false;
     }
 
-    const users = loadUsers();
-    if (users[normalized]) {
-      showAuthError("That username is already taken.");
+    const { data, error } = await supabase.auth.signUp({
+      email: usernameToEmail(username),
+      password,
+    });
+    if (error) {
+      showAuthError(error.message);
       return false;
     }
 
-    const salt = generateSalt();
-    const passwordHash = await hashPassword(password, salt);
+    // Public username row, separate from the private auth.users record.
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .insert({ id: data.user.id, username: displayUsername(username) });
+    if (profileError) {
+      showAuthError(profileError.message);
+      return false;
+    }
 
-    users[normalized] = {
-      username: displayName,
-      salt,
-      passwordHash,
-      createdAt: Date.now(),
-    };
-
-    saveUsers(users);
-    saveSession(displayName);
+    currentUser = { username: displayUsername(username), id: data.user.id };
     updateAuthUI();
     return true;
   }
 
   async function logIn(username, password) {
-    const normalized = normalizeUsername(username);
-    const users = loadUsers();
-    const user = users[normalized];
-
-    if (!user) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: usernameToEmail(username),
+      password,
+    });
+    if (error) {
       showAuthError("Invalid username or password.");
       return false;
     }
 
-    const passwordHash = await hashPassword(password, user.salt);
-    if (passwordHash !== user.passwordHash) {
-      showAuthError("Invalid username or password.");
-      return false;
-    }
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", data.user.id)
+      .single();
 
-    saveSession(user.username);
+    currentUser = { username: profile.username, id: data.user.id };
     updateAuthUI();
     return true;
   }
 
-  function logOut() {
-    clearSession();
+  async function logOut() {
+    await supabase.auth.signOut();
+    currentUser = null;
     updateAuthUI();
     closeMobileNav();
   }
@@ -413,55 +359,36 @@
   }
 
   function validateExchangeInput(mySkill, seekingSkill, description) {
-    if (!mySkill) {
-      return "Please enter the skill you can teach.";
-    }
-
-    if (mySkill.length < 2) {
-      return "My Skill must be at least 2 characters.";
-    }
-
-    if (!seekingSkill) {
-      return "Please enter the skill you are seeking.";
-    }
-
-    if (seekingSkill.length < 2) {
-      return "Seeking Skill must be at least 2 characters.";
-    }
-
-    if (!description) {
-      return "Please add a description for your exchange.";
-    }
-
-    if (description.length < 10) {
-      return "Description must be at least 10 characters.";
-    }
-
+    if (!mySkill) return "Please enter the skill you can teach.";
+    if (mySkill.length < 2) return "My Skill must be at least 2 characters.";
+    if (!seekingSkill) return "Please enter the skill you are seeking.";
+    if (seekingSkill.length < 2) return "Seeking Skill must be at least 2 characters.";
+    if (!description) return "Please add a description for your exchange.";
+    if (description.length < 10) return "Description must be at least 10 characters.";
     return "";
   }
 
-  function submitExchange(mySkill, seekingSkill, description) {
+  async function submitExchange(mySkill, seekingSkill, description) {
     const validationError = validateExchangeInput(mySkill, seekingSkill, description);
     if (validationError) {
       showExchangeError(validationError);
       return false;
     }
 
-    const exchange = {
-      id: crypto.randomUUID(),
-      mySkill,
-      seekingSkill,
+    const ok = await createPost("exchange", {
+      my_skill: mySkill,
+      seeking_skill: seekingSkill,
       description,
-      author: currentUser.username,
-      status: "active",
-      createdAt: Date.now(),
-    };
+    });
 
-    exchanges.unshift(exchange);
-    saveExchanges();
+    if (!ok) {
+      showExchangeError("Something went wrong submitting your exchange. Please try again.");
+      return false;
+    }
+
     exchangeForm.reset();
     clearExchangeError();
-    renderFeed();
+    await refreshFeed();
     return true;
   }
 
@@ -551,9 +478,9 @@
 
     const resolveBtn = card.querySelector(".card__resolve");
     if (resolveBtn) {
-      resolveBtn.addEventListener("click", () => {
+      resolveBtn.addEventListener("click", async () => {
         if (confirm("Mark this exchange as resolved? It will be archived from the active feed.")) {
-          markResolved("exchange", exchange.id);
+          await markResolved(exchange.id);
         }
       });
     }
@@ -599,37 +526,14 @@
 
     const resolveBtn = card.querySelector(".card__resolve");
     if (resolveBtn) {
-      resolveBtn.addEventListener("click", () => {
+      resolveBtn.addEventListener("click", async () => {
         if (confirm("Mark this request as resolved? It will be archived from the active feed.")) {
-          markResolved("request", req.id);
+          await markResolved(req.id);
         }
       });
     }
 
     return card;
-  }
-
-  // ── Resolve / archive ────────────────────────────────────────────
-  function markResolved(kind, id) {
-    const record = getPostRecord(kind, id);
-    if (!record) return;
-
-    // Defense-in-depth: the button is only rendered for the owner, but
-    // enforce the same rule here in case this is ever called another way.
-    if (normalizeUsername(record.author) !== normalizeUsername(currentUser?.username || "")) {
-      return;
-    }
-
-    record.status = "resolved";
-    record.resolvedAt = Date.now();
-    if (kind === "request") saveRequests();
-    else saveExchanges();
-
-    renderFeed();
-
-    if (activeChatThreadId === getThreadId(kind, id)) {
-      updateChatModalHeader();
-    }
   }
 
   // ── Modals ──────────────────────────────────────────────────────
@@ -661,8 +565,8 @@
     clearAuthError();
   }
 
-  // ── Chat (shared group thread per post) ───────────────────────────
-  function openChatModal(kind, id, title, author) {
+  // ── Chat (shared group thread per post, backed by Supabase Realtime) ──
+  async function openChatModal(kind, id, title, author) {
     if (!isLoggedIn()) {
       openAuthModal("login", "Please log in to join the discussion.");
       return;
@@ -672,15 +576,14 @@
     activeChatPostId = id;
     activeChatPostTitle = title;
     activeChatPostAuthor = author;
-    activeChatThreadId = getThreadId(kind, id);
-    lastRenderedChatSignature = null; // force a fresh render for the new thread
 
     updateChatModalHeader();
-    renderChatThread({ force: true });
     chatModal.showModal();
     chatInput.value = "";
     chatInput.focus();
-    startChatPolling();
+
+    await renderChatThread();
+    subscribeToThread(id);
   }
 
   // Keeps the modal's title/subtitle/resolved badge in sync with the live
@@ -700,32 +603,43 @@
     chatModal.close(); // triggers the 'close' listener below, which does cleanup
   }
 
-  // Always re-reads localStorage — never trusts an in-memory copy of the
-  // thread — so two tabs/accounts converge on the same message array.
-  function getActiveThreadMessages() {
-    if (!activeChatThreadId) return [];
-    const chats = loadChats();
-    const thread = chats[activeChatThreadId];
-    return thread ? thread.messages : [];
+  function buildChatBubble(msg) {
+    const mine = normalizeUsername(msg.sender) === normalizeUsername(currentUser.username);
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${mine ? "chat-bubble--mine" : "chat-bubble--theirs"}`;
+    // Group thread can have more than 2 participants, so label who sent
+    // each non-mine message (own messages are already on the right).
+    bubble.innerHTML = `
+      ${mine ? "" : `<span class="chat-bubble__sender">${escapeHtml(msg.sender)}</span>`}
+      <span class="chat-bubble__text">${escapeHtml(msg.text)}</span>
+      <span class="chat-bubble__time">${formatChatTime(msg.timestamp)}</span>
+    `;
+    return bubble;
   }
 
-  // Cheap fingerprint of the thread so we can skip re-rendering (and
-  // stealing scroll position / input focus) when nothing has changed.
-  function getChatSignature(messages) {
-    if (messages.length === 0) return "0";
-    const last = messages[messages.length - 1];
-    return `${messages.length}:${last.timestamp}`;
+  async function loadThreadMessages(postId) {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return [];
+    }
+
+    return data.map((row) => ({
+      sender: row.sender_name,
+      text: row.text,
+      timestamp: new Date(row.created_at).getTime(),
+    }));
   }
 
-  function renderChatThread({ force = false } = {}) {
-    if (!activeChatThreadId) return;
+  async function renderChatThread() {
+    if (!activeChatPostId) return;
 
-    const messages = getActiveThreadMessages();
-    const signature = getChatSignature(messages);
-
-    if (!force && signature === lastRenderedChatSignature) return;
-    lastRenderedChatSignature = signature;
-
+    const messages = await loadThreadMessages(activeChatPostId);
     chatMessagesEl.innerHTML = "";
 
     if (messages.length === 0) {
@@ -736,93 +650,128 @@
       return;
     }
 
-    messages.forEach((msg) => {
-      const mine = normalizeUsername(msg.sender) === normalizeUsername(currentUser.username);
-      const bubble = document.createElement("div");
-      bubble.className = `chat-bubble ${mine ? "chat-bubble--mine" : "chat-bubble--theirs"}`;
-      // Group thread can have more than 2 participants, so label who sent
-      // each non-mine message (own messages are already on the right).
-      bubble.innerHTML = `
-        ${mine ? "" : `<span class="chat-bubble__sender">${escapeHtml(msg.sender)}</span>`}
-        <span class="chat-bubble__text">${escapeHtml(msg.text)}</span>
-        <span class="chat-bubble__time">${formatChatTime(msg.timestamp)}</span>
-      `;
-      chatMessagesEl.appendChild(bubble);
-    });
-
+    messages.forEach((msg) => chatMessagesEl.appendChild(buildChatBubble(msg)));
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
   }
 
-  function sendChatMessage(text) {
-    if (!activeChatThreadId || !isLoggedIn()) return;
+  async function sendChatMessage(text) {
+    if (!activeChatPostId || !isLoggedIn()) return;
 
-    // Re-load right before writing (not the stale copy from the last
-    // render) so a message that arrived from the other tab a moment ago
-    // doesn't get clobbered by this write.
-    const chats = loadChats();
-    if (!chats[activeChatThreadId]) {
-      chats[activeChatThreadId] = {
-        postKind: activeChatKind,
-        postId: activeChatPostId,
-        postTitle: activeChatPostTitle,
-        postAuthor: activeChatPostAuthor,
-        messages: [],
-      };
-    }
-
-    chats[activeChatThreadId].messages.push({
-      sender: currentUser.username,
+    const { error } = await supabase.from("messages").insert({
+      post_id: activeChatPostId,
+      sender_id: currentUser.id,
+      sender_name: currentUser.username,
       text,
-      timestamp: Date.now(),
     });
 
-    saveChats(chats);
-    renderChatThread();
+    if (error) console.error(error);
+    // No manual re-render here — the realtime subscription below appends
+    // the new message (for this tab and every other open tab/account).
+  }
+
+  // Live-updates the open chat modal the instant anyone (including this
+  // user, in another tab) inserts a message for this post — no polling,
+  // no localStorage `storage` event, just a Postgres change subscription.
+  function subscribeToThread(postId) {
+    unsubscribeFromThread();
+
+    chatChannel = supabase
+      .channel(`messages:${postId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `post_id=eq.${postId}` },
+        (payload) => {
+          const row = payload.new;
+          const msg = {
+            sender: row.sender_name,
+            text: row.text,
+            timestamp: new Date(row.created_at).getTime(),
+          };
+
+          const emptyState = chatMessagesEl.querySelector(".chat-empty");
+          if (emptyState) emptyState.remove();
+
+          chatMessagesEl.appendChild(buildChatBubble(msg));
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+      )
+      .subscribe();
+  }
+
+  function unsubscribeFromThread() {
+    if (chatChannel) {
+      supabase.removeChannel(chatChannel);
+      chatChannel = null;
+    }
+  }
+
+  function formatChatTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
   // ── Inbox ──────────────────────────────────────────────────────
-  // A thread counts as "yours" if you started the post it's attached to,
-  // or you've sent at least one message in it. Threads with zero messages
-  // aren't real conversations yet, so they're left out of the Inbox.
-  function getInboxConversations() {
+  // A conversation counts as "yours" if you started the post it's attached
+  // to, or you've sent at least one message in it. One bulk query for the
+  // relevant posts' messages, newest first, deduped client-side to the
+  // latest message per post.
+  async function getInboxConversations() {
     if (!isLoggedIn()) return [];
 
-    const chats = loadChats();
-    const me = normalizeUsername(currentUser.username);
+    const [{ data: ownPosts, error: ownError }, { data: myMessages, error: msgError }] =
+      await Promise.all([
+        supabase.from("posts").select("id").eq("author_id", currentUser.id),
+        supabase.from("messages").select("post_id").eq("sender_id", currentUser.id),
+      ]);
 
-    return Object.entries(chats)
-      .map(([threadId, thread]) => {
-        if (!thread.messages || thread.messages.length === 0) return null;
+    if (ownError) console.error(ownError);
+    if (msgError) console.error(msgError);
 
-        const record = getPostRecord(thread.postKind, thread.postId);
-        const title = record ? getPostDisplayTitle(thread.postKind, record) : thread.postTitle;
-        const author = record ? record.author : thread.postAuthor;
-        const resolved = record ? isResolved(record) : false;
+    const postIds = Array.from(
+      new Set([...(ownPosts || []).map((p) => p.id), ...(myMessages || []).map((m) => m.post_id)])
+    );
+    if (postIds.length === 0) return [];
 
-        const participates =
-          normalizeUsername(author) === me ||
-          thread.messages.some((m) => normalizeUsername(m.sender) === me);
+    const { data: threadMessages, error } = await supabase
+      .from("messages")
+      .select("*")
+      .in("post_id", postIds)
+      .order("created_at", { ascending: false });
 
-        if (!participates) return null;
+    if (error) {
+      console.error(error);
+      return [];
+    }
 
-        const lastMessage = thread.messages[thread.messages.length - 1];
+    const seen = new Set();
+    const conversations = [];
 
-        return {
-          threadId,
-          kind: thread.postKind,
-          postId: thread.postId,
-          title,
-          author,
-          resolved,
-          lastMessage,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.lastMessage.timestamp - a.lastMessage.timestamp);
+    for (const row of threadMessages) {
+      if (seen.has(row.post_id)) continue; // rows are newest-first, so first hit = latest
+      seen.add(row.post_id);
+
+      const kind = getPostKind(row.post_id);
+      const record = kind ? getPostRecord(kind, row.post_id) : null;
+      if (!kind || !record) continue; // post no longer in our local cache
+
+      conversations.push({
+        kind,
+        postId: row.post_id,
+        title: getPostDisplayTitle(kind, record),
+        author: record.author,
+        resolved: isResolved(record),
+        lastMessage: {
+          sender: row.sender_name,
+          text: row.text,
+          timestamp: new Date(row.created_at).getTime(),
+        },
+      });
+    }
+
+    return conversations; // already newest-first
   }
 
-  function renderInbox() {
-    const conversations = getInboxConversations();
+  async function renderInbox() {
+    const conversations = await getInboxConversations();
     inboxList.innerHTML = "";
 
     if (conversations.length === 0) {
@@ -858,9 +807,9 @@
     });
   }
 
-  function openInboxModal() {
+  async function openInboxModal() {
     if (!isLoggedIn()) return;
-    renderInbox();
+    await renderInbox();
     inboxModal.showModal();
   }
 
@@ -868,62 +817,32 @@
     inboxModal.close();
   }
 
-  function formatChatTime(timestamp) {
-    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  // The `storage` event is the fast path, but it only fires in *other*
-  // tabs, isn't guaranteed on every browser/setup (notably flaky for
-  // file:// origins), and never fires in the tab that made the write. A
-  // short poll while the modal is open is a reliable fallback/backstop for
-  // all of those cases; renderChatThread() no-ops if nothing changed.
-  function startChatPolling() {
-    stopChatPolling();
-    chatPollTimer = window.setInterval(() => {
-      if (!activeChatThreadId || !chatModal.open) {
-        stopChatPolling();
-        return;
-      }
-      renderChatThread();
-    }, 1200);
-  }
-
-  function stopChatPolling() {
-    if (chatPollTimer) {
-      window.clearInterval(chatPollTimer);
-      chatPollTimer = null;
-    }
-  }
-
   // ── Form submit ─────────────────────────────────────────────────
-  postForm.addEventListener("submit", (e) => {
+  postForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const newRequest = {
-      id: crypto.randomUUID(),
+    const ok = await createPost("request", {
       title: document.getElementById("post-title").value.trim(),
       subject: document.getElementById("post-subject").value,
       description: document.getElementById("post-description").value.trim(),
-      author: document.getElementById("post-author").value.trim(),
-      status: "active",
-      createdAt: Date.now(),
-    };
+    });
 
-    requests.unshift(newRequest);
-    saveRequests();
-    renderFeed();
-    closePostModal();
+    if (ok) {
+      await refreshFeed();
+      closePostModal();
+    }
   });
 
   // ── Event listeners ─────────────────────────────────────────────
   themeToggle.addEventListener("click", toggleTheme);
 
   filterSubject.addEventListener("change", renderFeed);
+  filterResolved.addEventListener("change", renderFeed);
 
   document.getElementById("modal-close").addEventListener("click", closePostModal);
   document.getElementById("modal-cancel").addEventListener("click", closePostModal);
 
-  exchangeForm.addEventListener("submit", (e) => {
+  exchangeForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
     if (!isLoggedIn()) {
@@ -935,7 +854,7 @@
     const seekingSkill = document.getElementById("seeking-skill").value.trim();
     const description = document.getElementById("exchange-description").value.trim();
 
-    submitExchange(mySkill, seekingSkill, description);
+    await submitExchange(mySkill, seekingSkill, description);
   });
 
   document.getElementById("hero-post-btn").addEventListener("click", () => {
@@ -1015,35 +934,13 @@
 
   chatClose.addEventListener("click", closeChatModal);
 
-  chatForm.addEventListener("submit", (e) => {
+  chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = chatInput.value.trim();
     if (!text) return;
-    sendChatMessage(text);
     chatInput.value = "";
+    await sendChatMessage(text);
     chatInput.focus();
-  });
-
-  // Live-sync messages across open tabs/windows (e.g. two students chatting
-  // in separate tabs) by listening for localStorage changes to the chat store.
-  // This fires only in *other* tabs than the one that wrote the data, which
-  // is exactly the case we need (the sender's own tab already re-rendered
-  // synchronously inside sendChatMessage()).
-  window.addEventListener("storage", (e) => {
-    if (e.key === CHATS_KEY && activeChatThreadId && chatModal.open) {
-      renderChatThread();
-    }
-  });
-
-  // Catch same-machine edge cases the storage event can miss (e.g. the tab
-  // was backgrounded/throttled) by refreshing whenever this tab regains focus.
-  window.addEventListener("focus", () => {
-    if (activeChatThreadId && chatModal.open) renderChatThread();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && activeChatThreadId && chatModal.open) {
-      renderChatThread();
-    }
   });
 
   // Close modals on backdrop click
@@ -1056,17 +953,18 @@
   chatModal.addEventListener("click", (e) => {
     if (e.target === chatModal) closeChatModal();
   });
+  inboxModal.addEventListener("click", (e) => {
+    if (e.target === inboxModal) closeInboxModal();
+  });
 
   // Safety net: however the <dialog> closes (Escape key, backdrop click,
-  // our own closeChatModal, etc.) make sure the poll timer always stops.
+  // our own closeChatModal, etc.) make sure the realtime channel is torn down.
   chatModal.addEventListener("close", () => {
-    stopChatPolling();
+    unsubscribeFromThread();
     activeChatKind = null;
-    activeChatThreadId = null;
     activeChatPostId = null;
     activeChatPostTitle = null;
     activeChatPostAuthor = null;
-    lastRenderedChatSignature = null;
   });
 
   // ── Inbox event listeners ─────────────────────────────────────────
@@ -1076,11 +974,6 @@
     openInboxModal();
   });
   inboxClose.addEventListener("click", closeInboxModal);
-  inboxModal.addEventListener("click", (e) => {
-    if (e.target === inboxModal) closeInboxModal();
-  });
-
-  filterResolved.addEventListener("change", renderFeed);
 
   // ── Utilities ───────────────────────────────────────────────────
   function escapeHtml(str) {
